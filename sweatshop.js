@@ -124,7 +124,7 @@ function Sweatshop(src, num) {
 //		teardn.apply(this);
 	}
 
-	// @method should be string (2-arg sig) or array of several [method,args] (1-arg sig)
+	// @method should be string (2-arg sig) or hash of multiple {"method": params} (1-arg sig)
 	Sequence.prototype.call = function call(method, params) {
 		var self = this,
 			shop = this.shop;
