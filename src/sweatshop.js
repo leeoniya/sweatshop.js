@@ -145,17 +145,14 @@ function Sweatshop(src, num) {
 
 				if (args instanceof Array) {
 					var argArr = args;
-					args = function(result, wrkrId, isFirst, tmpCtx) {
+					args = function(result, wrkrId, cycle, tmpCtx) {
 						// prevents infinite loops
-						if (wrkrId == 0 && !isFirst)
-							tmpCtx.loop2 = true;
-
-						return tmpCtx.loop2 ? undefined : argArr;
+						return cycle > 0 ? undefined : argArr;
 					}
 				}
 				else if (args instanceof Sharder) {
 					var shrd = args;
-					args = function(result, wrkrId, isFirst, tmpCtx) {
+					args = function(result, wrkrId, cycle, tmpCtx) {
 						var argu = shrd.next.apply(shrd, arguments);
 
 						// TODO: figure out what to do with returned offset
@@ -164,7 +161,7 @@ function Sweatshop(src, num) {
 					};
 				}
 
-				var wrkrId = 0, emptyloop = true, argu, isFirst = true, tmpCtx = {};
+				var wrkrId = 0, emptyloop = true, argu, cycle = 0, tmpCtx = {};
 
 				while (1) {
 					// re-loop if there were any args provided on prior loop
@@ -174,9 +171,10 @@ function Sweatshop(src, num) {
 
 						wrkrId = 0;
 						emptyloop = true;
+						cycle++;
 					}
 					else {
-						argu = args(result, wrkrId, isFirst, tmpCtx);
+						argu = args(result, wrkrId, cycle, tmpCtx);
 
 						if (argu) {
 							emptyloop = false;
@@ -197,7 +195,6 @@ function Sweatshop(src, num) {
 						}
 
 						wrkrId++;
-						isFirst = false;
 					}
 				}
 			}
