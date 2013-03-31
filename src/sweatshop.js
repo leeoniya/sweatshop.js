@@ -145,14 +145,14 @@ function Sweatshop(src, num) {
 
 				if (args instanceof Array) {
 					var argArr = args;
-					args = function(result, wrkrId, cycle, tmpCtx) {
+					args = function(result, cycle, wrkrId, tmpCtx) {
 						// prevents infinite loops
 						return cycle > 0 ? undefined : argArr;
 					}
 				}
 				else if (args instanceof Sharder) {
 					var shrd = args;
-					args = function(result, wrkrId, cycle, tmpCtx) {
+					args = function(result, cycle, wrkrId, tmpCtx) {
 						var argu = shrd.next.apply(shrd, arguments);
 
 						// TODO: figure out what to do with returned offset
@@ -161,7 +161,7 @@ function Sweatshop(src, num) {
 					};
 				}
 
-				var wrkrId = 0, emptyloop = true, argu, cycle = 0, tmpCtx = {};
+				var cycle = 0, wrkrId = 0, emptyloop = true, argu, tmpCtx = {};
 
 				while (1) {
 					// re-loop if there were any args provided on prior loop
@@ -174,7 +174,7 @@ function Sweatshop(src, num) {
 						cycle++;
 					}
 					else {
-						argu = args(result, wrkrId, cycle, tmpCtx);
+						argu = args(result, cycle, wrkrId, tmpCtx);
 
 						if (argu) {
 							emptyloop = false;
