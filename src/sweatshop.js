@@ -70,7 +70,7 @@ function Sweatshop(src, num) {
 		if (typeof getWeight === "function") {
 			if (type !== "Array")
 				throw new Error("Weighted sharding requires the data to be an array of objects, but '" + type + "' was provided.");
-			return new Sweatshop.Sharder.ItemWt(data, getWeight);
+			return new Sweatshop.Sharder.ItemWt(data, this._num, getWeight);
 		}
 		// accounts for plain and typed arrays
 		else if (type.substr(-5) === "Array")
