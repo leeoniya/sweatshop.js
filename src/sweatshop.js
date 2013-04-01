@@ -213,7 +213,7 @@ function Sweatshop(src, num) {
 			var args = [result];
 
 			// intercept and append add'l convenience params from raw MessageEvent array
-			if (result instanceof Array && result[0] instanceof MessageEvent) {
+			if (result instanceof Array && typeOf(result[0]).substr(-12) == "MessageEvent") {
 				// array of .data (which hold RPC responses)
 				var rpcResps = result.map(function(msgEvt) {
 					return msgEvt.data;
