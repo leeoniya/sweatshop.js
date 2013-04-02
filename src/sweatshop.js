@@ -64,7 +64,7 @@ function Sweatshop(src, num) {
 	}
 
 	// sequence factory
-	Sweatshop.prototype.seq = function seq(setup, teardn) {
+	Sweatshop.prototype.seqn = function seqn(setup, teardn) {
 		return new Sequence(this, setup, teardn);
 	};
 
@@ -107,7 +107,9 @@ function Sweatshop(src, num) {
 	}
 
 	// @method should be string (2-arg sig) or hash of multiple {"method": params} (1-arg sig)
-	Sequence.prototype.call = function call(method, params) {
+	Sequence.prototype.call = function call(method, params, recycle) {
+		recycle = recycle || false;
+
 		var self = this,
 			shop = this.shop;
 
@@ -127,13 +129,13 @@ function Sweatshop(src, num) {
 					argFn;
 
 				if (args instanceof Array) {
-					argFn = function(result, cycle, wrkrId, tmpCtx) {
+					argFn = function(result, wrkrId, tmpCtx, cycle) {
 						if (cycle == 0)
 							return args;
 					};
 				}
 				else if (args instanceof Sharder) {
-					argFn = function(result, cycle, wrkrId, tmpCtx) {
+					argFn = function(result, wrkrId, tmpCtx, cycle) {
 						return args.next.apply(args, arguments);	// [0]
 					};
 				}
@@ -141,7 +143,7 @@ function Sweatshop(src, num) {
 					argFn = args;
 				}
 				else {
-					argFn = function(result, cycle, wrkrId, tmpCtx) {
+					argFn = function(result, wrkrId, tmpCtx, cycle) {
 						if (cycle == 0)
 							return result;
 					};
@@ -152,7 +154,7 @@ function Sweatshop(src, num) {
 				while (1) {
 					// re-loop if there were any args provided on prior loop
 					if (wrkrId == shop._num) {
-						if (emptyloop)
+						if (emptyloop || !recycle)
 							break;
 
 						wrkrId = 0;
@@ -160,15 +162,15 @@ function Sweatshop(src, num) {
 						cycle++;
 					}
 					else {
-						argu = argFn(result, cycle, wrkrId, tmpCtx);
+						argu = argFn(result, wrkrId, tmpCtx, cycle);
 
 						// check if a sharder is returned on first call
 						if (wrkrId == 0 && cycle == 0 && argu instanceof Sharder) {
 							args = argu;
-							argFn = function(result, cycle, wrkrId, tmpCtx) {
+							argFn = function(result, wrkrId, tmpCtx, cycle) {
 								return args.next.apply(args, arguments);		// [0]
 							};
-							argu = argFn(result, cycle, wrkrId, tmpCtx);
+							argu = argFn(result, wrkrId, tmpCtx, cycle);
 						}
 
 						if (argu) {
