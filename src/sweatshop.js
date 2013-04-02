@@ -63,24 +63,6 @@ function Sweatshop(src, num) {
 		return Object.prototype.toString.call(obj).slice(8,-1);
 	}
 
-	// sharder factory
-	Sweatshop.prototype.shard = function shard(data, isUnary, getWeight) {
-		var type = typeOf(data);
-
-		if (typeof getWeight === "function") {
-			if (type !== "Array")
-				throw new Error("Weighted sharding requires the data to be an array of objects, but '" + type + "' was provided.");
-			return new Sweatshop.Sharder.ItemWt(data, this._num, getWeight);
-		}
-		// accounts for plain and typed arrays
-		else if (type.substr(-5) === "Array")
-			return new Sweatshop.Sharder.Array(data, this._num, isUnary);
-		else if (type.substr(-9) === "Context2D")
-			return new Sweatshop.Sharder.Ctx2d(data, this._num);
-		else
-			throw new Error("No suitable sharder for datatype '" + type + "' could not be identified.");
-	};
-
 	// sequence factory
 	Sweatshop.prototype.seq = function seq(setup, teardn) {
 		return new Sequence(this, setup, teardn);
@@ -130,10 +112,10 @@ function Sweatshop(src, num) {
 			shop = this.shop;
 
 		var callpairs = {};
-		if (arguments.length > 1)
-			callpairs[method] = params;
-		else if (method instanceof Object)
+		if (arguments.length == 1 && method instanceof Object)
 			callpairs = method;
+		else
+			callpairs[method] = params;
 
 		var fn = function(result) {
 			self.dfrds = {};
@@ -141,23 +123,27 @@ function Sweatshop(src, num) {
 
 			for (var j in callpairs) {
 				var meth = j,
-					args = callpairs[j];
+					args = callpairs[j],
+					argFn;
 
 				if (args instanceof Array) {
-					var argArr = args;
-					args = function(result, cycle, wrkrId, tmpCtx) {
-						// prevents infinite loops
-						return cycle > 0 ? undefined : argArr;
-					}
+					argFn = function(result, cycle, wrkrId, tmpCtx) {
+						if (cycle == 0)
+							return args;
+					};
 				}
 				else if (args instanceof Sharder) {
-					var shrd = args;
-					args = function(result, cycle, wrkrId, tmpCtx) {
-						var argu = shrd.next.apply(shrd, arguments);
-
-						// TODO: figure out what to do with returned offset
-						if (argu)
-							return [argu[0]];
+					argFn = function(result, cycle, wrkrId, tmpCtx) {
+						return args.next.apply(args, arguments);	// [0]
+					};
+				}
+				else if (typeof args == "function") {
+					argFn = args;
+				}
+				else {
+					argFn = function(result, cycle, wrkrId, tmpCtx) {
+						if (cycle == 0)
+							return result;
 					};
 				}
 
@@ -174,7 +160,16 @@ function Sweatshop(src, num) {
 						cycle++;
 					}
 					else {
-						argu = args(result, cycle, wrkrId, tmpCtx);
+						argu = argFn(result, cycle, wrkrId, tmpCtx);
+
+						// check if a sharder is returned on first call
+						if (wrkrId == 0 && cycle == 0 && argu instanceof Sharder) {
+							args = argu;
+							argFn = function(result, cycle, wrkrId, tmpCtx) {
+								return args.next.apply(args, arguments);		// [0]
+							};
+							argu = argFn(result, cycle, wrkrId, tmpCtx);
+						}
 
 						if (argu) {
 							emptyloop = false;
@@ -279,84 +274,85 @@ function Sweatshop(src, num) {
 /*--------------------------------Sharders----------------------------------*/
 
 	// base proto for instanceof checks
-	function Sharder(data, num) {
-		// this must be implemented by sharders and return [part, offset]
+	function Sharder(data, chunks) {
+		// this must be implemented by sharders and return [part, offset] or undefined
 		this.next = function() {};
 	}
 
 	// sharder constructors
 	Sweatshop.Sharder = {
 		// TODO: use faster .subarray() for sharding typed arrays
-		// spreads arr over @num groups
-		"Array": function(arr, num, isUnary) {
+		// spreads @data array over @chunks groups
+		"Array": function(data, chunks, unary) {
 			Sharder.apply(this, arguments);
 
-			if (isUnary && num !== arr.length)
+			if (unary && chunks != data.length)
 				throw new Error("Unary sharding requires one item per shard.");
 
-			if (num > arr.length)
-				num = arr.length;
+			if (chunks > data.length)
+				chunks = data.length;
 
-			var len = arr.length,
+			var len = data.length,
 				pos = 0,
-				rem = len % num,
-				siz = (len - rem) / num,
+				rem = len % chunks,
+				siz = (len - rem) / chunks,
 				end = false;
 
 			this.next = function() {
-				if (end) return undefined;
+				if (end) return;
 
 				var prt, pos0 = pos;
 
 				if (len - (pos + siz) == rem) {	// last
-					prt = arr.slice(pos);
+					prt = data.slice(pos);
 					pos = len - 1;
 					end = true;
 				}
 				else {
-					prt = arr.slice(pos, pos + siz);
+					prt = data.slice(pos, pos + siz);
 					pos += siz;
 				}
 
-				return [isUnary ? prt[0] : prt, pos0];
+				return [unary ? prt[0] : prt, pos0];
 			};
 		},
 
-		// spreads @items over @num groups by weight returned by calling @getWt(itm)
-		ItemWt: function(items, num, getWt) {
+		// spreads @data array over @chunks groups by weight returned from @getWt() applied to each element
+		// data gets sorted by weight first, so indicies are discarded; pre-tag the elems yourself if needed
+		ItemWt: function(data, chunks, getWt) {
 			Sharder.apply(this, arguments);
 
-			if (num > items.length)
-				num = items.length;
+			if (chunks > data.length)
+				chunks = data.length;
 
-			var itms2 = [], sum = 0, wt;
-			items.forEach(function(itm,idx){
+			var items = [], sum = 0, wt;
+			data.forEach(function(itm,idx){
 				wt = getWt(itm);
 				sum += wt;
-				itms2.push([itm,wt]);
+				items.push([itm,wt]);
 			});
 
-			itms2.sort(function(a,b){
+			items.sort(function(a,b){
 				return a[1] < b[1];
 			});
 
-			var p = 0, dir = 1, parts = [], sums = [], targ = sum/num, itm;
+			var p = 0, dir = 1, parts = [], sums = [], targ = sum/chunks, itm;
 
-			for (var j = 0; j < num; j++) {
+			for (var j = 0; j < chunks; j++) {
 				parts[j] = [];
 				sums[j] = 0;
 			}
 
 			// sweep back and forth to distribute weights
-			while (itms2.length) {
+			while (items.length) {
 				if (sums[p] < targ) {
-					itm = itms2.shift();
+					itm = items.shift();
 					parts[p].push(itm[0]);
 					sums[p] += itm[1];
 				}
 
 				// invert sweep
-				if (p == 0 && dir == -1 || p == num-1 && dir == 1)
+				if (p == 0 && dir == -1 || p == chunks-1 && dir == 1)
 					dir *= -1;
 				else
 					p += dir;
@@ -364,39 +360,41 @@ function Sweatshop(src, num) {
 
 			this.next = function() {
 				var prt = parts.shift(),
-					pos0 = num - parts.length - 1;
+					pos0 = chunks - parts.length - 1;
 
-				return prt ? [prt, pos0] : null;
+				if (prt)
+					return [prt, null];
 			};
 		},
 
-		// spreads lines of pixels over @num groups
-		Ctx2d: function(ctx2d, num) {
+		// spreads lines of pixels over @chunks groups
+		// @data: CanvasRenderingContext2D
+		Ctx2d: function(data, chunks) {
 			Sharder.apply(this, arguments);
 
-			var can = ctx2d.canvas;
+			var can = data.canvas;
 
-			if (num > can.height)
-				num = can.height;
+			if (chunks > can.height)
+				chunks = can.height;
 
 			var	len = can.height,			// num of horiz px lines
 				pos = 0,
-				rem = len % num,
-				siz = (len - rem) / num,
+				rem = len % chunks,
+				siz = (len - rem) / chunks,
 				end = false;
 
 			this.next = function() {
-				if (end) return null;
+				if (end) return;
 
 				var prt, pos0 = pos * can.width;
 
 				if (len - (pos + siz) == rem) {	// last
-					prt = ctx2d.getImageData(0, pos, can.width, siz + rem);
+					prt = data.getImageData(0, pos, can.width, siz + rem);
 					pos = len - 1;
 					end = true;
 				}
 				else {
-					prt = ctx2d.getImageData(0, pos, can.width, siz);
+					prt = data.getImageData(0, pos, can.width, siz);
 					pos += siz;
 				}
 
