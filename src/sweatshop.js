@@ -98,6 +98,10 @@ function Sweatshop(src, num) {
 		this.dfrd0 = shop.defer();
 		this._fired = false;
 
+		// flags used to augment waterfall'd args from call->then
+		this._currCall = false;
+		this._lastCall = false;
+
 		// temp holder for pending responses
 		this.dfrds = {};
 		this.chain.push(shop.prom(this.dfrd0));
@@ -199,47 +203,63 @@ function Sweatshop(src, num) {
 			return shop.all(proms);
 		};
 
+		this._currCall = true;
+
 		// TODO?: also pass in fail, prog
 		return this.then(fn);
 	}
 
 	Sequence.prototype.then = function then(done, fail, prog) {
-		var last = this.chain[this.chain.length - 1];
+		var last = this.chain[this.chain.length - 1],
+			self = this,
+			doneFn = done;
 
-		var doneFn = function(result) {
-			var args = [result];
+		// intercept and append add'l convenience params from
+		// raw JSON-RPC response array (only for call->then pairs)
+		if (this._lastCall && !this._currCall) {
+			doneFn = function(result) {
+				var args = [];
 
-			// intercept and append add'l convenience params from raw MessageEvent array
-			if (result instanceof Array && typeOf(result[0]).substr(-12) == "MessageEvent") {
-				// array of .data (which hold RPC responses)
-				var rpcResps = result.map(function(msgEvt) {
-					return msgEvt.data;
+				// group responses by wrkrId and check if it's a recycle'd resp (multiple per wrkr)
+				var wid, recyc = false, resps = [];
+				result.forEach(function(resp){
+					wid = +resp.id.split(":")[0];
+
+					if (!resps[wid])
+						resps[wid] = [];
+
+					resps[wid].push(resp);		// maybe use the msg sequence id here instead of push()
+
+					if (resps[wid].length > 1)
+						recyc = true;
 				});
-				args.push(rpcResps);
 
-				// array of data.result (RPC results)
-				var rpcReslts = rpcResps.map(function(rpcResp) {
-					return rpcResp.result;
-				});
-				args.push(rpcReslts);
-
-				// array of .data.extra (my non-standard RPC addition for out-of-band response info)
-				if (rpcResps[0].extra) {
-					var rpcExtras = rpcResps.map(function(rpcResp) {
-						return rpcResp.extra;
-					});
-					args.push(rpcExtras);
+				// TODO: group other params
+				if (recyc) {
+					// use resps
 				}
-			}
+				else {
+					// aggregated .result
+					args.push(result.map(function(resp) {return resp.result;}));
+					// aggregated .extra (my non-standard RPC addition for out-of-band response info)
+					args.push(result.map(function(resp) {return resp.extra;}));
+					// raw responses
+					args.push(result);
+				}
 
-			return done.apply(this, args);
-		};
+				return done.apply(this, args);
+			};
+		}
+
+		this._lastCall = this._currCall;
+		this._currCall = false;
 
 		this.chain.push(last.then(doneFn, fail, prog));
 
 		return this;
 	};
 
+	// TODO: @spread param would be useful here but promises cannot be resolved with multiple values :(
 	Sequence.prototype.proc = function proc(data) {
 		var seq;
 
@@ -252,12 +272,12 @@ function Sweatshop(src, num) {
 			shop = seq.shop;
 
 		// respawn
-		// todo: fire teardn() here?
+		// TODO: fire teardn() here?
 		shop.close().spawn();
 
 		shop.wrkrs.forEach(function(wrkr){
 			wrkr.onmessage = function(e) {
-				self.dfrds[e.data.id].resolve(e);
+				self.dfrds[e.data.id].resolve(e.data);
 				// also reject on RPC e.data.error...
 			};
 
