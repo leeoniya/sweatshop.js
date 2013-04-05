@@ -2,7 +2,7 @@
 * Copyright (c) 2013, Leon Sorokin
 * All rights reserved. (MIT Licensed)
 *
-* sweatshop.js - parallel processing for web workers
+* sweatshop.js - parallel processing via web workers
 */
 
 function Sweatshop(src, num) {
